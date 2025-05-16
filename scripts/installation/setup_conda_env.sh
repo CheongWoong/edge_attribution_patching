@@ -1,0 +1,1 @@
+conda env create -f scripts/installation/conda_env.yml
