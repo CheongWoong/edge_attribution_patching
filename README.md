@@ -10,7 +10,7 @@ bash scripts/installation/setup_conda_env.sh
 
 ## Run the code
 Run the following script to run EAP.  
-The edge attribution scores are saved in "jobs_edge_patching_baseline/{dataset_name}_{model_name}/results".
+The edge attribution scores are saved in "jobs_EAP/{dataset_name}_{model_name}/results".
 ```
 python src/EAP.py --dataset_name {dataset_name} --model_name {model_name}
 ```

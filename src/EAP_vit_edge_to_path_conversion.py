@@ -1,4 +1,4 @@
-my_path = "/data/cwkang/CausalPathTracing/test/CausalPathTracing_for_ViT/main"
+my_path = "../main"
 
 import os
 import argparse
@@ -84,7 +84,7 @@ for dataset_name in [args.dataset_name]:
         new_head_state_dict["head.bias"] = old_state_dict["model.head.bias"]
         model = custom_load_tl_model(model_name, dataset_name, new_head_state_dict, num_classes, device)
 
-        out_path = os.path.join("jobs_edge_patching_baseline", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join("jobs_EAP", dataset_name + "_" + model_name.split("/")[-1])
 
         try:
             model = patchable_model(

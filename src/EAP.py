@@ -155,10 +155,10 @@ for dataset_name in [args.dataset_name]:
                 
         stwd_ids = sorted(list(set(stopword_ids)))
 
-        with open(f"data/{dataset_name}.json", "r") as fin:
+        with open(f"../main/data/{dataset_name}.json", "r") as fin:
             dataset = json.load(fin)
 
-        out_path = os.path.join("jobs_edge_patching_baseline", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join("jobs_EAP", dataset_name + "_" + model_name.split("/")[-1])
         os.makedirs(os.path.join(out_path, "inp_info"), exist_ok=True)
         os.makedirs(os.path.join(out_path, "results"), exist_ok=True)
 
