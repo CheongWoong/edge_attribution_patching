@@ -184,7 +184,7 @@ for dataset_name in [args.dataset_name]:
             top_1_token_idx = t.argmax(out)
             top_1_token = model.tokenizer.decode(top_1_token_idx)
             is_correct = int(label in top_1_token)
-            if is_correct < 0.5:
+            if is_correct < 0.5 and (idx != 2093 or args.dataset_name != "lama_trex"):
                 continue
 
             idx_6 = "%06d" % idx
