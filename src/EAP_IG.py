@@ -20,7 +20,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def custom_load_tl_model(model_name, device):
     try:
-        model = load_tl_model(model_name, device)
+        if model_name == "openai-community/gpt2":
+            model = load_tl_model("gpt2", device)
+        else:
+            model = load_tl_model(model_name, device)
     except:
         if "gpt2-xs" in model_name:
             cfg = tl.HookedTransformerConfig(
@@ -131,8 +134,8 @@ def custom_load_tl_model(model_name, device):
 
 
 parser = argparse.ArgumentParser(description='helloworld')
-parser.add_argument("--dataset_name", type=str, required=True, choices=["known_1000", "lama_trex"])
-parser.add_argument("--model_name", type=str, required=True, choices=["AlgorithmicResearchGroup/gpt2-xs", "EleutherAI/pythia-14m", "EleutherAI/pythia-1b"])
+parser.add_argument("--dataset_name", type=str, required=True, choices=["known_1000", "lama_trex", "ioi_matched_samples"])
+parser.add_argument("--model_name", type=str, required=True, choices=["AlgorithmicResearchGroup/gpt2-xs", "EleutherAI/pythia-14m", "EleutherAI/pythia-1b", "openai-community/gpt2"])
 args = parser.parse_args()
 
 # for dataset_name in ["known_1000", "lama_trex"]:
@@ -187,6 +190,7 @@ for dataset_name in [args.dataset_name]:
             if is_correct < 0.5 and (idx != 2093 or args.dataset_name != "lama_trex" or "gpt2-xs" not in args.model_name):
                 continue
 
+
             idx_6 = "%06d" % idx
             with open(os.path.join(out_path, "inp_info", f"I{idx_6}.txt"), "w") as fout:
                 inp_info = f"li:{idx}\nprompt:{prompt}\ny:{label}\n"
@@ -213,7 +217,7 @@ for dataset_name in [args.dataset_name]:
                 path=path,
                 device=device,
                 prepend_bos=False,
-                batch_size=100 if "pythia-1b" not in model_name else 10,
+                batch_size=100 if ("pythia-1b" not in model_name and "openai-community/gpt2" not in model_name) else 10,
                 train_test_size=(num_noise_sample, 0),
                 shuffle=False,
             )

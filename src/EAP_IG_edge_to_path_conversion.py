@@ -163,7 +163,7 @@ for dataset_name in [args.dataset_name]:
         with open(f"../main/data/{dataset_name}.json", "r") as fin:
             dataset = json.load(fin)
 
-        out_path = os.path.join("jobs_EAP", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join("jobs_EAP_IG", dataset_name + "_" + model_name.split("/")[-1])
         os.makedirs(os.path.join(out_path, "inp_info"), exist_ok=True)
         os.makedirs(os.path.join(out_path, "results"), exist_ok=True)
 
