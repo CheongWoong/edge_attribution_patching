@@ -1,4 +1,4 @@
-my_path = "/data5/users/dahee/Causal_Path/CausalPathTracing_for_ViT/main"
+my_path = "vit_main"
 
 import os
 import argparse
@@ -13,8 +13,10 @@ from auto_circuit.types import PruneScores
 from auto_circuit.utils.graph_utils import patchable_model
 
 from pathlib import Path
-from vit_prisma.models.base_vit import HookedViT
 from tqdm.auto import tqdm
+
+from .util import find_knowns_ids
+from .util import custom_load_tl_model_vision as custom_load_tl_model
 
 import sys
 vit_path = Path(my_path)
@@ -22,41 +24,6 @@ if vit_path not in sys.path:
     sys.path.insert(0, str(vit_path))
 from lib.utils import get_model, get_data
 from torch.utils.data import DataLoader
-
-def custom_load_tl_model(model_name, dataset_name, new_head_state_dict, num_classes, device):
-    assert dataset_name in ["imagenet", "officehome"]
-    if dataset_name == "imagenet":
-        model = HookedViT.from_pretrained(model_name,
-            center_writing_weights=True,
-            center_unembed=True,
-            fold_ln=True,
-            refactor_factored_attn_matrices=True,
-        )
-    elif dataset_name == "officehome":
-        model = HookedViT.from_pretrained(model_name,
-            center_writing_weights=True,
-            center_unembed=True,
-            fold_ln=True,
-            refactor_factored_attn_matrices=True,
-            new_head_state_dict=new_head_state_dict,
-            num_classes=num_classes,
-        )
-    
-    model.cfg.use_attn_result = True
-    model.cfg.use_attn_in = True
-    model.cfg.use_hook_mlp_in = True
-
-    model.cfg.use_split_qkv_input = False
-    model.cfg.tokenizer_prepends_bos = False
-    model.cfg.default_prepend_bos = False
-
-    model.cfg.return_type = "logits"
-
-    model.to(device)
-    model.eval()
-    for param in model.parameters():
-        param.requires_grad = False
-    return model
 
 
 parser = argparse.ArgumentParser(description='helloworld')
@@ -99,35 +66,6 @@ for dataset_name in [args.dataset_name]:
                 )
         except Exception as e:
             print("[Error]", e)
-
-        def find_knowns_ids(model, data="imagenet"):
-            assert data in ["imagenet", "officehome"]
-            # jobs_dir = "jobs" if data=="imagenet" else "jobs_oh"
-            jobs_dir = "jobs"
-            print("Finding knowns ids")
-            # job_root = Path(my_path) / jobs_dir / str(model)
-            job_root = Path(my_path) / jobs_dir / (str(model)+"_"+str(data)) / "results"
-            ids = []
-            dir_list = os.listdir(job_root)
-            print(len(dir_list))
-            for entry in job_root.iterdir():
-                if entry.is_dir():
-                    name = entry.name
-                    # idx = name.split("_")[1]
-                    idx = name[1:]
-
-                    results_dir = entry
-                    # Check if the results directory exists and is not empty
-                    if results_dir.exists():
-                        if any(results_dir.iterdir()):
-                            ids.append(int(idx))
-                        else:
-                            print("DD", idx)
-                    
-            print("Done finding knowns ids")
-            print(f"Found {len(ids)} knowns ids")
-            ids = sorted(ids)
-            return sorted(ids)
 
         known_ids = find_knowns_ids(model_name, dataset_name)
 
