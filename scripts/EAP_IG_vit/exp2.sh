@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=2 OMP_NUM_THREADS=1 nohup python src/EAP_IG_vit.py --dataset_name officehome --model_name vit_tiny_patch16_224 > exp2.log &
