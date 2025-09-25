@@ -1,3 +1,5 @@
+import time
+times = []
 import os
 import argparse
 
@@ -179,7 +181,7 @@ for dataset_name in [args.dataset_name]:
         rand_seed = 0
         num_noise_sample = 100
 
-        for idx, line in tqdm(enumerate(dataset)):
+        for idx, line in enumerate(tqdm(dataset)):
             prompt, label = line["prompt"], line["attribute"]
             inp = model.tokenizer.encode(prompt, return_tensors="pt").to(device)
             out = model(inp)[0][-1]
@@ -222,6 +224,7 @@ for dataset_name in [args.dataset_name]:
                 shuffle=False,
             )
 
+            start_time = time.time()
             attribution_scores: PruneScores = mask_gradient_prune_scores(
                 model=model,
                 dataloader=train_loader,
@@ -231,6 +234,10 @@ for dataset_name in [args.dataset_name]:
                 # mask_val=0.0,
                 integrated_grad_samples=5,
             )
+            end_time = time.time()
+            time_taken = end_time - start_time
+            times.append(time_taken)
+            print("^^^", len(times), "samples / Mean:", np.mean(times), "/ Median:", np.median(times), "/ Std:", np.std(times), "&&&")
 
             for key in attribution_scores:
                 attribution_scores[key] = attribution_scores[key].cpu().numpy()
@@ -240,3 +247,4 @@ for dataset_name in [args.dataset_name]:
             os.makedirs(os.path.join(out_path, "results", f"R{idx_4}"), exist_ok=True)
             fout = os.path.join(out_path, "results", f"R{idx_4}", f"raw_C{idx_6}.npy")
             np.save(fout, attribution_scores)
+        print("Finished")
