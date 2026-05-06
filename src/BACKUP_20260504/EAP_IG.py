@@ -19,7 +19,6 @@ from collections import OrderedDict
 import transformer_lens as tl
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from cpt_utils_20260504 import language_cpt_path, pending_cpt_indices, read_cpt_indices
 
 def custom_load_tl_model(model_name, device):
     try:
@@ -136,41 +135,9 @@ def custom_load_tl_model(model_name, device):
     return model
 
 
-def make_corrupt_tokens(tokenizer, prompt, num_noise_sample, rand_seed):
-    prng = np.random.RandomState(rand_seed)
-    enc_prompt = tokenizer.encode(prompt)
-    available_tokens = list(set(range(tokenizer.vocab_size)) - set(enc_prompt))
-    selected_tokens = prng.choice(available_tokens, size=num_noise_sample * len(enc_prompt))
-    return enc_prompt, selected_tokens.reshape(num_noise_sample, -1).tolist()
-
-
-@t.inference_mode()
-def corrupt_language_decision_changed(model, corrupt_tokens, stwd_ids, label, device, batch_size):
-    logits_sum = None
-    total = 0
-    for start in range(0, len(corrupt_tokens), batch_size):
-        batch_tokens = corrupt_tokens[start : start + batch_size]
-        batch = t.tensor(batch_tokens, dtype=t.long, device=device)
-        outputs = model(batch)
-        if isinstance(outputs, tuple):
-            outputs = outputs[0]
-        logits = outputs[:, -1, :].float()
-        curr_sum = logits.sum(dim=0)
-        logits_sum = curr_sum if logits_sum is None else logits_sum + curr_sum
-        total += logits.shape[0]
-
-    avg_logits = logits_sum / total
-    avg_logits[stwd_ids] *= 0
-    pred_token_idx = t.argmax(avg_logits)
-    pred_token = model.tokenizer.decode(pred_token_idx)
-    return label not in pred_token, pred_token, int(pred_token_idx.detach().cpu())
-
-
 parser = argparse.ArgumentParser(description='helloworld')
 parser.add_argument("--dataset_name", type=str, required=True, choices=["known_1000", "lama_trex", "ioi_matched_samples"])
 parser.add_argument("--model_name", type=str, required=True, choices=["AlgorithmicResearchGroup/gpt2-xs", "EleutherAI/pythia-14m", "EleutherAI/pythia-1b", "openai-community/gpt2"])
-parser.add_argument("--overwrite", action="store_true", help="Recompute every CPT index even when a valid raw result exists.")
-parser.add_argument("--score_function", type=str, default="logit", choices=["logit", "logit_diff", "logprob"])
 args = parser.parse_args()
 
 # for dataset_name in ["known_1000", "lama_trex"]:
@@ -196,22 +163,9 @@ for dataset_name in [args.dataset_name]:
         with open(f"../main/data/{dataset_name}.json", "r") as fin:
             dataset = json.load(fin)
 
-        out_path = os.path.join(f"jobs_EAP_{args.score_function}", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join("jobs_EAP_IG", dataset_name + "_" + model_name.split("/")[-1])
         os.makedirs(os.path.join(out_path, "inp_info"), exist_ok=True)
         os.makedirs(os.path.join(out_path, "results"), exist_ok=True)
-
-        cpt_indices = read_cpt_indices(language_cpt_path(dataset_name, model_name))
-        cpt_indices = [idx for idx in cpt_indices if 0 <= idx < len(dataset)]
-        pending_indices, valid_indices = pending_cpt_indices(cpt_indices, out_path)
-        run_indices = cpt_indices if args.overwrite else pending_indices
-        print(
-            f"CPT subset: total={len(cpt_indices)}, valid_existing={len(valid_indices)}, "
-            f"empty_or_missing={len(pending_indices)}, to_run={len(run_indices)}, "
-            f"overwrite={args.overwrite}"
-        )
-        if not run_indices:
-            print("No empty or missing CPT results. Finished")
-            continue
 
         try:
             model = patchable_model(
@@ -224,11 +178,10 @@ for dataset_name in [args.dataset_name]:
         except Exception as e:
             print("[Error]", e)
 
+        rand_seed = 0
         num_noise_sample = 100
-        corrupt_batch_size = 100 if ("pythia-1b" not in model_name and "openai-community/gpt2" not in model_name) else 10
 
-        for idx in tqdm(run_indices):
-            line = dataset[idx]
+        for idx, line in enumerate(tqdm(dataset)):
             prompt, label = line["prompt"], line["attribute"]
             inp = model.tokenizer.encode(prompt, return_tensors="pt").to(device)
             out = model(inp)[0][-1]
@@ -236,53 +189,37 @@ for dataset_name in [args.dataset_name]:
             top_1_token_idx = t.argmax(out)
             top_1_token = model.tokenizer.decode(top_1_token_idx)
             is_correct = int(label in top_1_token)
-            # if is_correct < 0.5 and (idx != 2093 or args.dataset_name != "lama_trex" or "gpt2-xs" not in args.model_name):
-            #     continue
+            if is_correct < 0.5 and (idx != 2093 or args.dataset_name != "lama_trex" or "gpt2-xs" not in args.model_name):
+                continue
+
 
             idx_6 = "%06d" % idx
             with open(os.path.join(out_path, "inp_info", f"I{idx_6}.txt"), "w") as fout:
                 inp_info = f"li:{idx}\nprompt:{prompt}\ny:{label}\n"
                 fout.write(inp_info)
 
-            corrupt_seed = 0
-            while True:
-                enc_prompt, corrupt_tokens = make_corrupt_tokens(
-                    model.tokenizer, prompt, num_noise_sample, corrupt_seed
-                )
-                changed, corrupt_top_1_token, corrupt_top_1_token_idx = corrupt_language_decision_changed(
-                    model, corrupt_tokens, stwd_ids, label, device, corrupt_batch_size
-                )
-                if changed:
-                    break
-                corrupt_seed += 1
-            if corrupt_seed:
-                print(f"idx={idx}: corrupted average decision changed with seed={corrupt_seed}")
-            with open(os.path.join(out_path, "inp_info", f"I{idx_6}.txt"), "a") as fout:
-                fout.write(
-                    f"corrupt_seed:{corrupt_seed}\n"
-                    f"corrupt_avg_top1:{corrupt_top_1_token}\n"
-                    f"corrupt_avg_top1_token_id:{corrupt_top_1_token_idx}\n"
-                    f"score_function:{args.score_function}\n"
-                )
+            # make corrupted samples
+            prng = np.random.RandomState(rand_seed)
+            enc_prompt = model.tokenizer.encode(prompt)
+            available_tokens = list(set(range(model.tokenizer.vocab_size)) - set(enc_prompt))
+            selected_tokens = prng.choice(available_tokens, size=num_noise_sample*len(enc_prompt))
+            corrupt_tokens = selected_tokens.reshape(num_noise_sample, -1).tolist()
             ans = model.tokenizer.encode(" " + label)
-            wrong_ans = [corrupt_top_1_token_idx] if args.score_function == "logit_diff" else ans
-            answer_function = "avg_diff" if args.score_function == "logit_diff" else "avg_val"
-            grad_function = "logprob" if args.score_function == "logprob" else "logit"
 
             new_samples = []
             for ct in corrupt_tokens:
-                new_samples.append({"clean": enc_prompt, "corrupt": ct, "answers": ans, "wrong_answers": wrong_ans})
+                new_samples.append({"clean": enc_prompt, "corrupt": ct, "answers": ans, "wrong_answers": ans})
             new_data = {"prompts": new_samples}
-            with open(f"temp_{args.dataset_name}_{args.model_name.split('/')[-1]}.json", "w") as fout_temp:
+            with open(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}.json", "w") as fout_temp:
                 json.dump(new_data, fout_temp)
 
-            path = Path(f"temp_{args.dataset_name}_{args.model_name.split('/')[-1]}.json")
+            path = Path(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}.json")
             train_loader, test_loader = load_datasets_from_json(
                 model=None,
                 path=path,
                 device=device,
                 prepend_bos=False,
-                batch_size=corrupt_batch_size,
+                batch_size=100 if ("pythia-1b" not in model_name and "openai-community/gpt2" not in model_name) else 10,
                 train_test_size=(num_noise_sample, 0),
                 shuffle=False,
             )
@@ -292,9 +229,10 @@ for dataset_name in [args.dataset_name]:
                 model=model,
                 dataloader=train_loader,
                 official_edges=None,
-                grad_function=grad_function,
-                answer_function=answer_function,
-                mask_val=0.0,
+                grad_function="logit",
+                answer_function="avg_val",
+                # mask_val=0.0,
+                integrated_grad_samples=5,
             )
             end_time = time.time()
             time_taken = end_time - start_time

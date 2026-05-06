@@ -15,6 +15,7 @@ from collections import OrderedDict, defaultdict
 import transformer_lens as tl
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from cpt_utils_20260504 import language_cpt_path, read_cpt_indices
 
 def custom_load_tl_model(model_name, device):
     try:
@@ -134,6 +135,7 @@ def custom_load_tl_model(model_name, device):
 parser = argparse.ArgumentParser(description='helloworld')
 parser.add_argument("--dataset_name", type=str, required=True, choices=["known_1000", "lama_trex", "ioi_matched_samples"])
 parser.add_argument("--model_name", type=str, required=True, choices=["AlgorithmicResearchGroup/gpt2-xs", "EleutherAI/pythia-14m", "EleutherAI/pythia-1b", "openai-community/gpt2"])
+parser.add_argument("--score_function", type=str, default="logit", choices=["logit", "logit_diff", "logprob"])
 args = parser.parse_args()
 
 rel_ids = {}
@@ -163,7 +165,7 @@ for dataset_name in [args.dataset_name]:
         with open(f"../main/data/{dataset_name}.json", "r") as fin:
             dataset = json.load(fin)
 
-        out_path = os.path.join("jobs_EAP_IG", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join(f"jobs_EAP_IG_{args.score_function}", dataset_name + "_" + model_name.split("/")[-1])
         os.makedirs(os.path.join(out_path, "inp_info"), exist_ok=True)
         os.makedirs(os.path.join(out_path, "results"), exist_ok=True)
 
@@ -199,11 +201,28 @@ for dataset_name in [args.dataset_name]:
                 raise Exception
             return {"node_type": node_type, "bidx": bidx, "hidx": hidx}
 
+        cpt_indices = read_cpt_indices(language_cpt_path(dataset_name, model_name))
+        cpt_indices = [idx for idx in cpt_indices if 0 <= idx < len(dataset)]
         class_idx_map = defaultdict(list)
-        for idx, line in tqdm(enumerate(dataset)):
+        num_incorrect = 0
+        for idx in tqdm(cpt_indices):
+            line = dataset[idx]
+            prompt, label = line["prompt"], line["attribute"]
+            inp = model.tokenizer.encode(prompt, return_tensors="pt").to(device)
+            out = model(inp)[0][-1]
+            out[stwd_ids] *= 0
+            top_1_token_idx = t.argmax(out)
+            top_1_token = model.tokenizer.decode(top_1_token_idx)
+            if label not in top_1_token:
+                num_incorrect += 1
             rel_id = line.get("relation_id", "NONE")
 
             class_idx_map[rel_id].append(idx)
+        print(
+            f"CPT conversion indices: total={len(cpt_indices)}, "
+            f"selected={sum(len(v) for v in class_idx_map.values())}, "
+            f"num_incorrect={num_incorrect}"
+        )
 
         task_indices = []
         task_attribution_scores = None

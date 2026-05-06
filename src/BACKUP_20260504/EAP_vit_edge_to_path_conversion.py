@@ -15,14 +15,8 @@ import json
 from collections import defaultdict
 from tqdm.auto import tqdm
 
-try:
-    from .util import find_knowns_ids
-    from .util import custom_load_tl_model_vision as custom_load_tl_model
-    from .cpt_utils_20260504 import read_cpt_indices, vision_cpt_path
-except ImportError:
-    from util import find_knowns_ids
-    from util import custom_load_tl_model_vision as custom_load_tl_model
-    from cpt_utils_20260504 import read_cpt_indices, vision_cpt_path
+from .util import find_knowns_ids
+from .util import custom_load_tl_model_vision as custom_load_tl_model
 
 import sys
 vit_path = Path(my_path)
@@ -34,7 +28,6 @@ from lib.utils import get_model, get_data
 parser = argparse.ArgumentParser(description='helloworld')
 parser.add_argument("--dataset_name", type=str, required=True, choices=["imagenet", "officehome"])
 parser.add_argument("--model_name", type=str, required=True, choices=["vit_tiny_patch16_224", "deit_tiny_patch16_224"])
-parser.add_argument("--score_function", type=str, default="logit", choices=["logit", "logit_diff", "logprob"])
 args = parser.parse_args()
 
 # for dataset_name in ["imagenet", "officehome"]:
@@ -58,7 +51,7 @@ for dataset_name in [args.dataset_name]:
         new_head_state_dict["head.bias"] = old_state_dict["model.head.bias"]
         model = custom_load_tl_model(model_name, dataset_name, new_head_state_dict, num_classes, device)
 
-        out_path = os.path.join(f"jobs_EAP_IG_{args.score_function}", dataset_name + "_" + model_name.split("/")[-1])
+        out_path = os.path.join("jobs_EAP", dataset_name + "_" + model_name.split("/")[-1])
 
         try:
             model = patchable_model(
@@ -93,24 +86,13 @@ for dataset_name in [args.dataset_name]:
                 raise Exception
             return {"node_type": node_type, "bidx": bidx, "hidx": hidx}
 
-        cpt_indices = read_cpt_indices(vision_cpt_path(dataset_name, model_name))
-        cpt_indices = [idx for idx in cpt_indices if 0 <= idx < len(dataset)]
+        known_ids = find_knowns_ids(model_name, dataset_name)
+
         class_idx_map = defaultdict(list)
-        num_incorrect = 0
-        for idx in tqdm(cpt_indices):
-            image, label = dataset[idx]
-            image_input = image.unsqueeze(0).to(device)
-            output = model(image_input)[0]
-            pred = t.argmax(output, dim=-1)
-            if pred.item() != label:
-                num_incorrect += 1
+        for idx in tqdm(known_ids):
+            _, label = dataset[idx]
 
             class_idx_map[label].append(idx)
-        print(
-            f"CPT conversion indices: total={len(cpt_indices)}, "
-            f"selected={sum(len(v) for v in class_idx_map.values())}, "
-            f"num_incorrect={num_incorrect}"
-        )
 
         task_indices = []
         task_attribution_scores = None
