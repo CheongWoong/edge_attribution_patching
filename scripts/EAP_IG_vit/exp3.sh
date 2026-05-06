@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=5 OMP_NUM_THREADS=1 nohup python src/EAP_IG_vit.py --dataset_name imagenet --model_name deit_tiny_patch16_224 > exp3.log &

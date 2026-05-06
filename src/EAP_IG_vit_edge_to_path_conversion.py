@@ -7,9 +7,7 @@ import torch as t
 import numpy as np
 
 from auto_circuit.utils.graph_utils import patchable_model
-from auto_circuit.utils.tensor_ops import prune_scores_threshold
 
-import networkx as nx
 from pathlib import Path
 import json
 from collections import defaultdict
@@ -19,10 +17,26 @@ try:
     from .util import find_knowns_ids
     from .util import custom_load_tl_model_vision as custom_load_tl_model
     from .cpt_utils_20260504 import read_cpt_indices, vision_cpt_path
+    from .edge_conversion_utils_20260506 import (
+        DEFAULT_PRUNE_RATIOS,
+        add_summary_record,
+        conversion_out_path,
+        path_circuit_and_metadata,
+        write_edge_ratio_summaries,
+        write_sample_jsons,
+    )
 except ImportError:
     from util import find_knowns_ids
     from util import custom_load_tl_model_vision as custom_load_tl_model
     from cpt_utils_20260504 import read_cpt_indices, vision_cpt_path
+    from edge_conversion_utils_20260506 import (
+        DEFAULT_PRUNE_RATIOS,
+        add_summary_record,
+        conversion_out_path,
+        path_circuit_and_metadata,
+        write_edge_ratio_summaries,
+        write_sample_jsons,
+    )
 
 import sys
 vit_path = Path(my_path)
@@ -35,6 +49,8 @@ parser = argparse.ArgumentParser(description='helloworld')
 parser.add_argument("--dataset_name", type=str, required=True, choices=["imagenet", "officehome"])
 parser.add_argument("--model_name", type=str, required=True, choices=["vit_tiny_patch16_224", "deit_tiny_patch16_224"])
 parser.add_argument("--score_function", type=str, default="logit", choices=["logit", "logit_diff", "logprob"])
+parser.add_argument("--prune_ratios", type=float, nargs="+", default=DEFAULT_PRUNE_RATIOS)
+parser.add_argument("--filter_connected", action="store_true")
 args = parser.parse_args()
 
 # for dataset_name in ["imagenet", "officehome"]:
@@ -112,6 +128,7 @@ for dataset_name in [args.dataset_name]:
             f"num_incorrect={num_incorrect}"
         )
 
+        edge_ratio_summaries = defaultdict(list)
         task_indices = []
         task_attribution_scores = None
         for class_id, indices in tqdm(class_idx_map.items()):
@@ -145,186 +162,49 @@ for dataset_name in [args.dataset_name]:
                     for key in attribution_scores:
                         task_attribution_scores[key] += attribution_scores[key]
 
-                for prune_ratio in [0.25]:
-                    threshold = prune_scores_threshold(attribution_scores, int(len(model.edges)*prune_ratio))
-                    # threshold = t.cat([ps.flatten() for _, ps in attribution_scores.items()]).sort(descending=True).values[int(len(model.edges)*prune_ratio) - 1]
-
-                    edges = {}
-                    for edge in model.edges:
-                        edges[edge.name] = edge.prune_score(attribution_scores).abs() >= threshold
-
-                    ############################################################
-                    ### Pruning disconnected nodes
-                    G = nx.DiGraph()
-
-                    for conn, active in edges.items():
-                        if active:
-                            src, dst = conn.split("->")
-                            G.add_edge(src, dst)
-
-                    reachable_from_input = set(nx.descendants(G, "Resid Start")) | {"Resid Start"}
-
-                    reversed_G = G.reverse()
-                    reachable_to_output = set(nx.descendants(reversed_G, "Resid End")) | {"Resid End"}
-
-                    connected_nodes = reachable_from_input & reachable_to_output
-
-                    pruned_G = G.subgraph(connected_nodes).copy()
-
-                    pruned_edges = [(u, v) for u, v in pruned_G.edges]
-                    ############################################################
-
-                    ############################################################
-                    ### Convert edges to paths
-                    causal_subsets = defaultdict(set)
-                    for u, v in pruned_edges:
-                        u_info, v_info = extract_node_info(u), extract_node_info(v)
-                        # Attention + MLP
-                        if u_info["node_type"] == "Attention" and v_info["node_type"] == "MLP" and u_info["bidx"] == v_info["bidx"]:
-                            causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2 + model.cfg.n_heads)
-                        # Attention only
-                        if u_info["node_type"] == "Attention" and u_info["bidx"] != v_info["bidx"]:
-                            causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2)
-                        # MLP only
-                        if v_info["node_type"] == "MLP" and u_info["bidx"] != v_info["bidx"]:
-                            causal_subsets[v_info["bidx"]].add(1)
-                        # Residual only
-                        if v_info["bidx"] - u_info["bidx"] > 1:
-                            for bidx in range(u_info["bidx"] + 1, v_info["bidx"]):
-                                causal_subsets[bidx].add(0)
-                    
-                    for bidx in range(model.cfg.n_layers):
-                        causal_subsets[bidx] = [sorted(list(causal_subsets[bidx]))]
-                    # print(causal_subsets)
-                    ############################################################
-
-                    out_path_samplewise = out_path + f"_samplewise_{prune_ratio}"
-                    os.makedirs(os.path.join(out_path_samplewise, "results", f"R{idx_4}"), exist_ok=True)
-                    with open(os.path.join(out_path_samplewise, "results", f"R{idx_4}", f"C{idx_6}.json"), "w") as fout:
-                        json.dump(causal_subsets, fout, indent=2)
+                for prune_ratio in args.prune_ratios:
+                    causal_subsets, edge_metadata = path_circuit_and_metadata(
+                        model, attribution_scores, prune_ratio, args.filter_connected, extract_node_info
+                    )
+                    edge_metadata.update({"level": "samplewise", "idx": idx})
+                    out_path_samplewise = conversion_out_path(
+                        out_path, "samplewise", prune_ratio, args.filter_connected
+                    )
+                    write_sample_jsons(out_path_samplewise, idx, causal_subsets, edge_metadata)
+                    add_summary_record(edge_ratio_summaries, out_path_samplewise, edge_metadata)
 
             attribution_scores = class_attribution_scores
             if attribution_scores is not None:
-                for prune_ratio in [0.25]:
-                    threshold = prune_scores_threshold(attribution_scores, int(len(model.edges)*prune_ratio))
-                    # threshold = t.cat([ps.flatten() for _, ps in attribution_scores.items()]).sort(descending=True).values[int(len(model.edges)*prune_ratio) - 1]
-
-                    edges = {}
-                    for edge in model.edges:
-                        edges[edge.name] = edge.prune_score(attribution_scores).abs() >= threshold
-
-                    ############################################################
-                    ### Pruning disconnected nodes
-                    G = nx.DiGraph()
-
-                    for conn, active in edges.items():
-                        if active:
-                            src, dst = conn.split("->")
-                            G.add_edge(src, dst)
-
-                    reachable_from_input = set(nx.descendants(G, "Resid Start")) | {"Resid Start"}
-
-                    reversed_G = G.reverse()
-                    reachable_to_output = set(nx.descendants(reversed_G, "Resid End")) | {"Resid End"}
-
-                    connected_nodes = reachable_from_input & reachable_to_output
-
-                    pruned_G = G.subgraph(connected_nodes).copy()
-
-                    pruned_edges = [(u, v) for u, v in pruned_G.edges]
-                    ############################################################
-
-                    ############################################################
-                    ### Convert edges to paths
-                    causal_subsets = defaultdict(set)
-                    for u, v in pruned_edges:
-                        u_info, v_info = extract_node_info(u), extract_node_info(v)
-                        # Attention + MLP
-                        if u_info["node_type"] == "Attention" and v_info["node_type"] == "MLP" and u_info["bidx"] == v_info["bidx"]:
-                            causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2 + model.cfg.n_heads)
-                        # Attention only
-                        if u_info["node_type"] == "Attention" and u_info["bidx"] != v_info["bidx"]:
-                            causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2)
-                        # MLP only
-                        if v_info["node_type"] == "MLP" and u_info["bidx"] != v_info["bidx"]:
-                            causal_subsets[v_info["bidx"]].add(1)
-                        # Residual only
-                        if v_info["bidx"] - u_info["bidx"] > 1:
-                            for bidx in range(u_info["bidx"] + 1, v_info["bidx"]):
-                                causal_subsets[bidx].add(0)
-                    
-                    for bidx in range(model.cfg.n_layers):
-                        causal_subsets[bidx] = [sorted(list(causal_subsets[bidx]))]
-                    # print(causal_subsets)
-                    ############################################################
-
+                for prune_ratio in args.prune_ratios:
+                    causal_subsets, edge_metadata = path_circuit_and_metadata(
+                        model, attribution_scores, prune_ratio, args.filter_connected, extract_node_info
+                    )
+                    edge_metadata.update(
+                        {"level": "classwise", "class_id": int(class_id), "num_samples": len(class_indices)}
+                    )
+                    out_path_classwise = conversion_out_path(
+                        out_path, "classwise", prune_ratio, args.filter_connected
+                    )
+                    add_summary_record(edge_ratio_summaries, out_path_classwise, edge_metadata)
                     for idx in class_indices:
-                        idx_4 = "%04d" % idx
-                        idx_6 = "%06d" % idx
-                        out_path_classwise = out_path + f"_classwise_{prune_ratio}"
-                        os.makedirs(os.path.join(out_path_classwise, "results", f"R{idx_4}"), exist_ok=True)
-                        with open(os.path.join(out_path_classwise, "results", f"R{idx_4}", f"C{idx_6}.json"), "w") as fout:
-                            json.dump(causal_subsets, fout, indent=2)
+                        sample_metadata = edge_metadata.copy()
+                        sample_metadata["idx"] = idx
+                        write_sample_jsons(out_path_classwise, idx, causal_subsets, sample_metadata)
 
         attribution_scores = task_attribution_scores
         if attribution_scores is not None:
-            for prune_ratio in [0.25]:
-                threshold = prune_scores_threshold(attribution_scores, int(len(model.edges)*prune_ratio))
-                # threshold = t.cat([ps.flatten() for _, ps in attribution_scores.items()]).sort(descending=True).values[int(len(model.edges)*prune_ratio) - 1]
-
-                edges = {}
-                for edge in model.edges:
-                    edges[edge.name] = edge.prune_score(attribution_scores).abs() >= threshold
-
-                ############################################################
-                ### Pruning disconnected nodes
-                G = nx.DiGraph()
-
-                for conn, active in edges.items():
-                    if active:
-                        src, dst = conn.split("->")
-                        G.add_edge(src, dst)
-
-                reachable_from_input = set(nx.descendants(G, "Resid Start")) | {"Resid Start"}
-
-                reversed_G = G.reverse()
-                reachable_to_output = set(nx.descendants(reversed_G, "Resid End")) | {"Resid End"}
-
-                connected_nodes = reachable_from_input & reachable_to_output
-
-                pruned_G = G.subgraph(connected_nodes).copy()
-
-                pruned_edges = [(u, v) for u, v in pruned_G.edges]
-                ############################################################
-
-                ############################################################
-                ### Convert edges to paths
-                causal_subsets = defaultdict(set)
-                for u, v in pruned_edges:
-                    u_info, v_info = extract_node_info(u), extract_node_info(v)
-                    # Attention + MLP
-                    if u_info["node_type"] == "Attention" and v_info["node_type"] == "MLP" and u_info["bidx"] == v_info["bidx"]:
-                        causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2 + model.cfg.n_heads)
-                    # Attention only
-                    if u_info["node_type"] == "Attention" and u_info["bidx"] != v_info["bidx"]:
-                        causal_subsets[u_info["bidx"]].add(u_info["hidx"] + 2)
-                    # MLP only
-                    if v_info["node_type"] == "MLP" and u_info["bidx"] != v_info["bidx"]:
-                        causal_subsets[v_info["bidx"]].add(1)
-                    # Residual only
-                    if v_info["bidx"] - u_info["bidx"] > 1:
-                        for bidx in range(u_info["bidx"] + 1, v_info["bidx"]):
-                            causal_subsets[bidx].add(0)
-                
-                for bidx in range(model.cfg.n_layers):
-                    causal_subsets[bidx] = [sorted(list(causal_subsets[bidx]))]
-                # print(causal_subsets)
-                ############################################################
-
+            for prune_ratio in args.prune_ratios:
+                causal_subsets, edge_metadata = path_circuit_and_metadata(
+                    model, attribution_scores, prune_ratio, args.filter_connected, extract_node_info
+                )
+                edge_metadata.update({"level": "taskwise", "num_samples": len(task_indices)})
+                out_path_taskwise = conversion_out_path(
+                    out_path, "taskwise", prune_ratio, args.filter_connected
+                )
+                add_summary_record(edge_ratio_summaries, out_path_taskwise, edge_metadata)
                 for idx in task_indices:
-                    idx_4 = "%04d" % idx
-                    idx_6 = "%06d" % idx
-                    out_path_taskwise = out_path + f"_taskwise_{prune_ratio}"
-                    os.makedirs(os.path.join(out_path_taskwise, "results", f"R{idx_4}"), exist_ok=True)
-                    with open(os.path.join(out_path_taskwise, "results", f"R{idx_4}", f"C{idx_6}.json"), "w") as fout:
-                        json.dump(causal_subsets, fout, indent=2)
+                    sample_metadata = edge_metadata.copy()
+                    sample_metadata["idx"] = idx
+                    write_sample_jsons(out_path_taskwise, idx, causal_subsets, sample_metadata)
+
+        write_edge_ratio_summaries(edge_ratio_summaries)
