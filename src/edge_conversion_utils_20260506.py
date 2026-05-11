@@ -77,7 +77,6 @@ def causal_subsets_from_edges(model, pruned_edges, extract_node_info):
                 causal_subsets[bidx].add(0)
 
     for bidx in range(model.cfg.n_layers):
-        causal_subsets[bidx].add(0) # Add residual connection by default
         causal_subsets[bidx] = [sorted(list(causal_subsets[bidx]))]
     return causal_subsets
 
