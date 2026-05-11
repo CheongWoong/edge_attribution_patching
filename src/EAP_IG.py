@@ -274,10 +274,10 @@ for dataset_name in [args.dataset_name]:
             for ct in corrupt_tokens:
                 new_samples.append({"clean": enc_prompt, "corrupt": ct, "answers": ans, "wrong_answers": wrong_ans})
             new_data = {"prompts": new_samples}
-            with open(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}.json", "w") as fout_temp:
+            with open(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}_{args.score_function}.json", "w") as fout_temp:
                 json.dump(new_data, fout_temp)
 
-            path = Path(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}.json")
+            path = Path(f"temp_EAP_IG_{args.dataset_name}_{args.model_name.split('/')[-1]}_{args.score_function}.json")
             train_loader, test_loader = load_datasets_from_json(
                 model=None,
                 path=path,
