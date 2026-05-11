@@ -7,7 +7,8 @@ import networkx as nx
 from auto_circuit.utils.tensor_ops import prune_scores_threshold
 
 
-DEFAULT_PRUNE_RATIOS = [0.01, 0.025, 0.05, 0.1, 0.25]
+# DEFAULT_PRUNE_RATIOS = [0.01, 0.025, 0.05, 0.1, 0.25]
+DEFAULT_PRUNE_RATIOS = [0.1, 0.25]
 
 
 def prune_ratio_label(prune_ratio):
@@ -76,6 +77,7 @@ def causal_subsets_from_edges(model, pruned_edges, extract_node_info):
                 causal_subsets[bidx].add(0)
 
     for bidx in range(model.cfg.n_layers):
+        causal_subsets[bidx].add(0) # Add residual connection by default
         causal_subsets[bidx] = [sorted(list(causal_subsets[bidx]))]
     return causal_subsets
 

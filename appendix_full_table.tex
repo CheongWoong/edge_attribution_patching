@@ -1,0 +1,32 @@
+\begin{table*}[t]
+\centering
+\caption{
+Full sparsity results before and after applying the sparsity optimization algorithm. Lower values indicate better sparsity.
+}
+\label{tab:sparsity_full}
+\begin{tabular}{llccccc}
+\toprule
+Domain & Dataset & Model & FLOPs-level (Original) & FLOPs-level (Minimal) & Path-level (Original) & Path-level (Minimal) \\
+\midrule
+\multirow{8}{*}{Language}
+ \multirow{4}{*}{Factual1000} & GPT2-xs & 0.7203 & 0.6670 & 0.5780 & 0.4101 \\
+& & & Pythia-1b & 0.6893 & 0.6697 & 0.4697 & 0.3785 \\
+& & & Pythia-14m & 0.9562 & 0.9562 & 0.7247 & 0.6944 \\
+& & & Average & 0.7886 & 0.7643 & 0.5908 & 0.4943 \\
+\cmidrule(lr){2-7}
+& \multirow{4}{*}{LAMA} & GPT2-xs & 0.6995 & 0.6527 & 0.5578 & 0.4021 \\
+& & & Pythia-1b & 0.6578 & 0.6311 & 0.4435 & 0.3467 \\
+& & & Pythia-14m & 0.9452 & 0.9443 & 0.6965 & 0.6621 \\
+& & & Average & 0.7675 & 0.7427 & 0.5659 & 0.4703 \\
+\midrule
+\multirow{6}{*}{Vision}
+ \multirow{3}{*}{ImageNet} & VisionModel-A & - & - & - & - \\
+& & & VisionModel-B & - & - & - & - \\
+& & & Average & - & - & - & - \\
+\cmidrule(lr){2-7}
+& \multirow{3}{*}{OfficeHome} & VisionModel-A & - & - & - & - \\
+& & & VisionModel-B & - & - & - & - \\
+& & & Average & - & - & - & - \\
+\bottomrule
+\end{tabular}
+\end{table*}

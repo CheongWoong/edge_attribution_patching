@@ -1,0 +1,23 @@
+\begin{table}[t]
+\centering
+\caption{
+Average sparsity across datasets within each domain. Lower is better.
+}
+\label{tab:sparsity_main}
+\begin{tabular}{llcccc}
+\toprule
+Domain & Model & FLOPs Orig. & FLOPs Min. & Path Orig. & Path Min. \\
+\midrule
+\multirow{4}{*}{Language}
+ & GPT2-xs & 0.7099 & 0.6599 & 0.5679 & 0.4061 \\
+& & Pythia-1b & 0.6736 & 0.6504 & 0.4566 & 0.3626 \\
+& & Pythia-14m & 0.9507 & 0.9503 & 0.7106 & 0.6783 \\
+& & Average & 0.7780 & 0.7535 & 0.5783 & 0.4823 \\
+\midrule
+\multirow{3}{*}{Vision}
+ & VisionModel-A & - & - & - & - \\
+& & VisionModel-B & - & - & - & - \\
+& & Average & - & - & - & - \\
+\bottomrule
+\end{tabular}
+\end{table}
